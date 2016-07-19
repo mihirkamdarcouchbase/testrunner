@@ -28,11 +28,14 @@ class BaseUITestCase(unittest.TestCase):
     def _start_selenium(self):
         host = self.machine.ip
         if host in ['localhost', '127.0.0.1']:
-
-            os.system("java -jar selenium-server-standalone-2.48.2.jar -Dwebdriver.chromedriver='~/Applications/chromedriver' > selenium.log 2>&1"
-                      )
+             os.system("java -jar %sselenium-server-standalone*.jar "
+                       "-Dwebdriver.chrome.driver=%s > selenium.log 2>&1"
+                                 % (self.input.ui_conf['selenium_path'],\
+                                      self.input.ui_conf['chrome_path']))
         else:
-            self.shell.execute_command('{0}start-selenium.bat > {0}selenium.log 2>&1 &'.format(self.input.ui_conf['selenium_path']))
+            """ go to remote server with better video driver to display browser """
+            self.shell.execute_command('{0}start-selenium.bat > {0}selenium.log 2>&1 &'\
+                                           .format(self.input.ui_conf['selenium_path']))
 
     def _kill_old_drivers(self):
         if self.shell.extract_remote_info().type.lower() == 'windows':
