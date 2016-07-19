@@ -103,32 +103,23 @@ class BaseUITestCase(unittest.TestCase):
                 self._wait_for_selenium_is_started()
             self.log.info('start selenium session')
             if self.browser == 'firefox':
-                self.log.info("firefox")
-        #         self.driver = webdriver.Remote(desired_capabilities={
-        #     "browserName": "firefox",
-        #     "platform": "MAC",
-        # })
+                self.log.info("Test Couchbase Server UI in Firefox")
                 self.driver = webdriver.Remote(command_executor='http://{0}:{1}/wd/hub'
-                                               .format(self.machine.ip,
-                                                       self.machine.port),
-                                               desired_capabilities=DesiredCapabilities.FIREFOX)
+                                                               .format(self.machine.ip,
+                                                                    self.machine.port),
+                                     desired_capabilities=DesiredCapabilities.FIREFOX)
             elif self.browser == 'chrome':
-                self.log.info("chrome")
-                local_capabilities = DesiredCapabilities.CHROME
-                chrome_options = Options()
-                chrome_options.add_experimental_option("excludeSwitches", ["ignore-certificate-errors"])
-                local_capabilities.update(chrome_options.to_capabilities())
-                self.log.info(self.machine.ip)
-                self.log.info(self.machine.port)
-                self.driver = webdriver.Remote(desired_capabilities={
-            "browserName": "chrome",
-            "platform": "MAC",
-        })
-            self.log.info('start selenium started')
+                self.log.info("Test Couchbase Server UI in Chrome")
+                self.driver = webdriver.Remote(command_executor='http://{0}:{1}/wd/hub'
+                                                               .format(self.machine.ip,
+                                                                    self.machine.port),
+                                      desired_capabilities=DesiredCapabilities.CHROME)
+            """ need to add support test on Internet Explorer """
 
-            self.driver.get("http://127.0.0.1:8091")
-            self.username = "Administrator"
-            self.password = "password"
+            self.log.info('*** selenium started ***')
+            self.driver.get("http://" + self.servers[0].ip + ":8091")
+            self.username = self.input.membase_settings.rest_username
+            self.password = self.input.membase_settings.rest_password
             self.driver.maximize_window()
         except Exception as ex:
             self.input.test_params["stop-on-failure"] = True
