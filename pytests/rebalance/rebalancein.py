@@ -708,12 +708,18 @@ class RebalanceInTests(RebalanceBaseTest):
 
 class RebalanceWithPillowFight(BaseTestCase):
 
-    def load(self, server, items, batch=1000):
+    PREFIX = "test_"
+
+    def load(self, server, items, batch=1000, docsize=100):
         import subprocess
         from lib.testconstants import COUCHBASE_FROM_SPOCK
         rest = RestConnection(server)
-        cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -M 50 -B 1000 --populate-only --json" \
-            .format(server.ip, items, batch)
+        import multiprocessing
+
+        num_cores = multiprocessing.cpu_count()
+
+        cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {4} -M {4} -B {2} -c {3} --sequential --json -t {5}" \
+            .format(server.ip, items, batch, items/batch*2, docsize, num_cores*2)
         if rest.get_nodes_version()[:5] in COUCHBASE_FROM_SPOCK:
             cmd += " -u Administrator -P password"
         self.log.info("Executing '{0}'...".format(cmd))
