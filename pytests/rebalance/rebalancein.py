@@ -718,7 +718,7 @@ class RebalanceWithPillowFight(BaseTestCase):
 
         num_cores = multiprocessing.cpu_count()
 
-        cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {4} -M {4} -B {2} -c {3} --sequential --json -t {5} --rate-limit=5000" \
+        cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {4} -M {4} -B {2} -c {3} --sequential --json -t {5} --rate-limit=30000" \
             .format(server.ip, items, batch, items/batch*2, docsize, num_cores/2)
         if rest.get_nodes_version()[:5] in COUCHBASE_FROM_SPOCK:
             cmd += " -u Administrator -P password"
