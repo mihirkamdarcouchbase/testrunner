@@ -34,13 +34,13 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         rest = RestConnection(server)
         import multiprocessing
 
-        num_cores = multiprocessing.cpu_count()
-        num_cycles = int(items/batch * 1.25)
+        num_threads = multiprocessing.cpu_count()/2
+        num_cycles = int(items/batch * 1.25 / num_threads)
 
-        #cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {3} -M {3} -B {2} -c {5} --sequential --json -t {4} --rate-limit={6}" \
-        #    .format(server.ip, items, batch, docsize, num_cores/2, num_cycles, rate_limit)
-        cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {3} -M {3} -B {2} --populate-only --sequential --json -t {4} --rate-limit={6}" \
-                .format(server.ip, items, batch, docsize, num_cores/2, num_cycles, rate_limit)
+        cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {3} -M {3} -B {2} -c {5} --sequential --json -t {4} --rate-limit={6}" \
+            .format(server.ip, items, batch, docsize, num_threads, num_cycles, rate_limit)
+        #cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {3} -M {3} -B {2} --populate-only --sequential --json -t {4} --rate-limit={6}" \
+        #        .format(server.ip, items, batch, docsize, num_cores/2, num_cycles, rate_limit)
         if rest.get_nodes_version()[:5] in COUCHBASE_FROM_SPOCK:
             cmd += " -u Administrator -P password"
         self.log.info("Executing '{0}'...".format(cmd))
