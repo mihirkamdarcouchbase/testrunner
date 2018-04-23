@@ -127,4 +127,31 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                 format(self.num_items, rest.get_active_key_count(bucket)))
 
+    def test_rebalance_in_out(self):
+        servs_out = [self.servers[self.num_servers - i - 1] for i in
+                     range(self.nodes_out)]
+        rest = RestConnection(self.master)
+        bucket = rest.get_buckets()[0]
+        load_thread = Thread(target=self.load,
+                             name="pillowfight_load",
+                             args=(self.master, self.num_items, self.batch_size,
+                                   self.doc_size, self.rate_limit))
+
+        self.log.info('starting the load thread...')
+        load_thread.start()
+        rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
+                                                 self.servers[
+                                                 self.nodes_init:self.nodes_init + self.nodes_in], servs_out)
+        rebalance.result()
+        load_thread.join()
+        errors = self.check_dataloss(self.master, bucket)
+        if errors:
+            self.log.info("Printing missing keys:")
+        for error in errors:
+            print error
+        if self.num_items != rest.get_active_key_count(bucket):
+            self.fail(
+                "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
+                    format(self.num_items, rest.get_active_key_count(bucket)))
+
 
