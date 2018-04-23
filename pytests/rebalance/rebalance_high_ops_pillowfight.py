@@ -35,7 +35,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         import multiprocessing
 
         num_cores = multiprocessing.cpu_count()
-        num_cycles = round(items/batch * 1.25,0)
+        num_cycles = int(items/batch * 1.25)
 
         cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {3} -M {3} -B {2} -c {5} --sequential --json -t {4} --rate-limit={6}" \
             .format(server.ip, items, batch, docsize, num_cores/2, num_cycles, rate_limit)
