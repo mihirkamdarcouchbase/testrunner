@@ -10,6 +10,9 @@ from couchbase_helper.documentgenerator import BlobGenerator
 from membase.helper.rebalance_helper import RebalanceHelper
 from remote.remote_util import RemoteMachineShellConnection
 from membase.helper.cluster_helper import ClusterOperationHelper
+from couchbase.bucket import Bucket
+from couchbase.exceptions import NotFoundError
+from lib.memcached.helper.data_helper import VBucketAwareMemcached
 
 
 class RebalanceHighOpsWithPillowFight(BaseTestCase):
@@ -21,6 +24,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
 
     def tearDown(self):
         super(RebalanceHighOpsWithPillowFight, self).tearDown()
+        self.sleep(120, "Wait till delete bucket completes")
 
     PREFIX = "test_"
 
@@ -31,7 +35,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         import multiprocessing
 
         num_cores = multiprocessing.cpu_count()
-        num_cycles = items/batch * 2
+        num_cycles = round(items/batch * 1.25,0)
 
         cmd = "cbc-pillowfight -U couchbase://{0}/default -I {1} -m {3} -M {3} -B {2} -c {5} --sequential --json -t {4} --rate-limit={6}" \
             .format(server.ip, items, batch, docsize, num_cores/2, num_cycles, rate_limit)
@@ -43,9 +47,6 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             self.fail("Exception running cbc-pillowfight: subprocess module returned non-zero response!")
 
     def check_dataloss(self, server, bucket):
-        from couchbase.bucket import Bucket
-        from couchbase.exceptions import NotFoundError
-        from lib.memcached.helper.data_helper import VBucketAwareMemcached
         bkt = Bucket('couchbase://{0}/{1}'.format(server.ip, bucket.name))
         rest = RestConnection(self.master)
         VBucketAware = VBucketAwareMemcached(rest, bucket.name)
@@ -98,5 +99,30 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         if self.num_items != rest.get_active_key_count(bucket):
             self.fail("FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                           format(self.num_items, rest.get_active_key_count(bucket) ))
+
+    def test_rebalance_out(self):
+        servs_out = [self.servers[self.num_servers - i - 1] for i in
+                     range(self.nodes_out)]
+        rest = RestConnection(self.master)
+        bucket = rest.get_buckets()[0]
+        load_thread = Thread(target=self.load,
+                             name="pillowfight_load",
+                             args=(self.master, self.num_items, self.batch_size,
+                                   self.doc_size, self.rate_limit))
+
+        self.log.info('starting the load thread...')
+        load_thread.start()
+        rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],[],servs_out)
+        rebalance.result()
+        load_thread.join()
+        errors = self.check_dataloss(self.master, bucket)
+        if errors:
+            self.log.info("Printing missing keys:")
+        for error in errors:
+            print error
+        if self.num_items != rest.get_active_key_count(bucket):
+            self.fail(
+                "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
+                format(self.num_items, rest.get_active_key_count(bucket)))
 
 
