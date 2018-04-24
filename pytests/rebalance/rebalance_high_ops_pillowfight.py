@@ -103,8 +103,9 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                           format(self.num_items, rest.get_active_key_count(bucket) ))
 
     def test_rebalance_out(self):
-        servs_out = [self.servers[self.num_servers - i - 1] for i in
+        servs_out = [self.servers[self.nodes_init - i - 1] for i in
                      range(self.nodes_out)]
+        self.log.info("Servers Out: {0}".format(servs_out))
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
         load_thread = Thread(target=self.load,
@@ -128,8 +129,9 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 format(self.num_items, rest.get_active_key_count(bucket)))
 
     def test_rebalance_in_out(self):
-        servs_out = [self.servers[self.num_servers - i - 1] for i in
+        servs_out = [self.servers[self.nodes_init - i - 1] for i in
                      range(self.nodes_out)]
+        self.log.info("Servers Out: {0}".format(servs_out))
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
         load_thread = Thread(target=self.load,
