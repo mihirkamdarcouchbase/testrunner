@@ -9,8 +9,8 @@ def parseArguments():
   parser.add_argument('--batch_size', default=5000, help="Batch size of eatch inserts")
   parser.add_argument('--node', '-n', default="localhost", help='Cluster Node to connect to')
   parser.add_argument('--bucket', '-b', default="default", help='Bucket to connect to')
-  parser.add_argument('--password', '-p',default="password", help='User password')
-  parser.add_argument('--user', '-u',default="Administrator", help='Username')
+  parser.add_argument('--password', '-p',default="", help='User password')
+  parser.add_argument('--user', '-u',default="", help='Username')
   parser.add_argument('--prefix', '-k',default="CBPY_", help='Key Prefix')
   parser.add_argument('--timeout', '-t', default=2, type=int, help='Operation Timeout')
   parser.add_argument('--count', '-c', default=1000, type=int, help='Number of documents to insert')
@@ -23,10 +23,13 @@ host = args.node
 bucket_name = args.bucket
 user = args.user
 password = args.password
-cluster = Cluster("couchbase://{}".format(host))
-auth = PasswordAuthenticator(user, password)
-cluster.authenticate(auth)
-bucket = cluster.open_bucket(bucket_name, lockmode=LOCKMODE_WAIT)
+if user and password:
+    cluster = Cluster("couchbase://{}".format(host))
+    auth = PasswordAuthenticator(user, password)
+    cluster.authenticate(auth)
+    bucket = cluster.open_bucket(bucket_name, lockmode=LOCKMODE_WAIT)
+else:
+    bucket = Bucket('couchbase://{0}/{1}'.format(host, bucket_name))
 bucket.timeout = 5
 num_items = int(args.count)
 batch_size = int(args.batch_size)

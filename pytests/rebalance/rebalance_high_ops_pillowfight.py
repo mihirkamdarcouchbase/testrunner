@@ -27,13 +27,11 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
 
     def tearDown(self):
         super(RebalanceHighOpsWithPillowFight, self).tearDown()
-        self.sleep(120, "Wait till delete bucket completes")
-
-    PREFIX = "test_"
 
     def load_buckets_with_high_ops(self, server, bucket, items, batch=20000,
                                    threads=5, start_document=0, instances=1):
         import subprocess
+        from lib.testconstants import COUCHBASE_FROM_SPOCK
         cmd_format = "python scripts/high_ops_doc_loader.py  --node {0} --bucket {1} --user {2} --password {3} " \
                      "--count {4} " \
                      "--batch_size {5} --threads {6} --start_document {7}"
@@ -59,6 +57,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                          server.rest_password,
                                                          count, batch, threads,
                                                          start))
+        if RestConnection(server).get_nodes_version()[:5] < '5':
+            cmd = cmd.replace(
+                "--user {0} --password {1} ".format(server.rest_username,
+                                                    server.rest_password), '')
         self.log.info("Running {}".format(cmd))
         result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE)
@@ -102,7 +104,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             load_thread = Thread(target=self.load,
                                  name="pillowfight_load",
                                  args=(
-                                 self.master, self.num_items, self.batch_size,
+                                 self.master, num_items, self.batch_size,
                                  self.doc_size, self.rate_limit, start_document))
             return load_thread
         elif self.loader == "high_ops":
@@ -117,11 +119,15 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             return load_thread
 
     def check_dataloss_for_high_ops_loader(self, server, bucket, num_items):
+        if RestConnection(server).get_nodes_version()[:5] < '5':
+            bkt = Bucket('couchbase://{0}/{1}'.format(server.ip, bucket.name))
+        else:
+            cluster = Cluster("couchbase://{}".format(server.ip))
+            auth = PasswordAuthenticator(server.rest_username,
+                                         server.rest_password)
+            cluster.authenticate(auth)
+            bkt = cluster.open_bucket(bucket.name)
 
-        cluster = Cluster("couchbase://{}".format(server.ip))
-        auth = PasswordAuthenticator(server.rest_username, server.rest_password)
-        cluster.authenticate(auth)
-        bkt = cluster.open_bucket(bucket.name)
         rest = RestConnection(self.master)
         VBucketAware = VBucketAwareMemcached(rest, bucket.name)
         _, _, _ = VBucketAware.request_map(rest, bucket.name)
@@ -179,7 +185,15 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         return errors
 
     def check_dataloss(self, server, bucket):
-        bkt = Bucket('couchbase://{0}/{1}'.format(server.ip, bucket.name))
+        if RestConnection(server).get_nodes_version()[:5] < '5':
+            bkt = Bucket('couchbase://{0}/{1}'.format(server.ip, bucket.name))
+        else:
+            cluster = Cluster("couchbase://{}".format(server.ip))
+            auth = PasswordAuthenticator(server.rest_username,
+                                         server.rest_password)
+            cluster.authenticate(auth)
+            bkt = cluster.open_bucket(bucket.name)
+
         rest = RestConnection(self.master)
         VBucketAware = VBucketAwareMemcached(rest, bucket.name)
         _, _, _ = VBucketAware.request_map(rest, bucket.name)
@@ -273,13 +287,17 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         self.log.info("Servers Out: {0}".format(servs_out))
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
-        load_thread = self.load_docs(num_items=self.num_items)
+        load_thread = self.load_docs()
         self.log.info('starting the load thread...')
+        load_thread.start()
+        load_thread.join()
+        load_thread = self.load_docs(num_items=(self.num_items * 2),
+                                     start_document=self.num_items)
         load_thread.start()
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],[],servs_out)
         rebalance.result()
         load_thread.join()
-        num_items_to_validate = self.num_items
+        num_items_to_validate = self.num_items * 3
         errors = self.check_data(self.master, bucket, num_items_to_validate)
         if errors:
             self.log.info("Printing missing keys:")
@@ -296,15 +314,19 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         self.log.info("Servers Out: {0}".format(servs_out))
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
-        load_thread = self.load_docs(num_items=self.num_items)
+        load_thread = self.load_docs()
         self.log.info('starting the load thread...')
+        load_thread.start()
+        load_thread.join()
+        load_thread = self.load_docs(num_items=(self.num_items * 2),
+                                     start_document=self.num_items)
         load_thread.start()
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in], servs_out)
         rebalance.result()
         load_thread.join()
-        num_items_to_validate = self.num_items
+        num_items_to_validate = self.num_items * 3
         errors = self.check_data(self.master, bucket, num_items_to_validate)
         if errors:
             self.log.info("Printing missing keys:")
