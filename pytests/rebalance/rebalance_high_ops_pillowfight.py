@@ -215,7 +215,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         elif self.loader == "high_ops":
             return self.check_dataloss_for_high_ops_loader(server, bucket,
                                                            num_items)
-
+    '''
     def test_rebalance_in(self):
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
@@ -236,6 +236,36 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         if self.num_items != rest.get_active_key_count(bucket):
             self.fail("FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                           format(self.num_items, rest.get_active_key_count(bucket) ))
+
+    '''
+
+    def test_rebalance_in(self):
+        rest = RestConnection(self.master)
+        bucket = rest.get_buckets()[0]
+        load_thread = self.load_docs()
+        self.log.info('starting the load thread...')
+        load_thread.start()
+        load_thread.join()
+        load_thread = self.load_docs(num_items=(self.num_items * 2),
+                                     start_document=self.num_items)
+        load_thread.start()
+        rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
+                                                 self.servers[
+                                                 self.nodes_init:self.nodes_init + self.nodes_in],
+                                                 [])
+        rebalance.result()
+        load_thread.join()
+        num_items_to_validate = self.num_items * 3
+        errors = self.check_data(self.master, bucket, num_items_to_validate)
+        if errors:
+            self.log.info("Printing missing keys:")
+        for error in errors:
+            print error
+        if self.num_items * 2 != rest.get_active_key_count(bucket):
+            self.fail(
+                "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
+                format(self.num_items * 2, rest.get_active_key_count(bucket)))
+
 
     def test_rebalance_out(self):
         servs_out = [self.servers[self.nodes_init - i - 1] for i in
