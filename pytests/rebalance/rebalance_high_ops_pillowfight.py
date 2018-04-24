@@ -24,6 +24,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         self.doc_size = self.input.param("doc_size",100)
         self.loader = self.input.param("loader", "pillowfight")
         self.instances = self.input.param("instances", 1)
+        self.recovery_type = self.input.param("recovery_type", None)
+        self.node_out = self.input.param("node_out", 0)
 
     def tearDown(self):
         super(RebalanceHighOpsWithPillowFight, self).tearDown()
@@ -100,6 +102,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             self.fail("Exception running cbc-pillowfight: subprocess module returned non-zero response!")
 
     def load_docs(self, num_items=0, start_document=0):
+        if num_items == 0:
+            num_items = self.num_items
         if self.loader == "pillowfight":
             load_thread = Thread(target=self.load,
                                  name="pillowfight_load",
@@ -108,8 +112,6 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                  self.doc_size, self.rate_limit, start_document))
             return load_thread
         elif self.loader == "high_ops":
-            if num_items == 0:
-                num_items = self.num_items
             load_thread = Thread(target=self.load_buckets_with_high_ops,
                                  name="high_ops_load",
                                  args=(self.master, self.buckets[0], num_items,
@@ -337,4 +339,47 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                     format(self.num_items, rest.get_active_key_count(bucket)))
 
+    def test_graceful_failover_addback(self):
+        node_out = self.servers[self.node_out]
+        rest = RestConnection(self.master)
+        bucket = rest.get_buckets()[0]
+        load_thread = self.load_docs()
+        self.log.info('starting the load thread...')
+        load_thread.start()
+        load_thread.join()
+        load_thread = self.load_docs(num_items=(self.num_items * 2),
+                                     start_document=self.num_items)
+        load_thread.start()
+        nodes_all = self.rest.node_statuses()
+        for node in nodes_all:
+            if node.ip == node_out.ip:
+                break
+
+        failover_task = self.cluster.async_failover(
+            self.servers[:self.nodes_init],
+            [node_out],
+            self.graceful, wait_for_pending=60)
+
+        failover_task.result()
+
+        self.rest.set_recovery_type(node.id, self.recovery_type)
+        self.rest.add_back_node(node.id)
+
+        rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
+                                                 [], [])
+
+        reached = RestHelper(self.rest).rebalance_reached()
+        self.assertTrue(reached, "rebalance failed, stuck or did not complete")
+        rebalance.result()
+        load_thread.join()
+        num_items_to_validate = self.num_items * 3
+        errors = self.check_data(self.master, bucket, num_items_to_validate)
+        if errors:
+            self.log.info("Printing missing keys:")
+        for error in errors:
+            print error
+        if self.num_items != rest.get_active_key_count(bucket):
+            self.fail(
+                "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
+                    format(self.num_items, rest.get_active_key_count(bucket)))
 
