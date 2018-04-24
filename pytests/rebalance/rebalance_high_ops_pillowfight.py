@@ -350,7 +350,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         load_thread = self.load_docs(num_items=(self.num_items * 2),
                                      start_document=self.num_items)
         load_thread.start()
-        nodes_all = self.rest.node_statuses()
+        nodes_all = rest.node_statuses()
         for node in nodes_all:
             if node.ip == node_out.ip:
                 break
@@ -362,8 +362,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
 
         failover_task.result()
 
-        self.rest.set_recovery_type(node.id, self.recovery_type)
-        self.rest.add_back_node(node.id)
+        rest.set_recovery_type(node.id, self.recovery_type)
+        rest.add_back_node(node.id)
 
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  [], [])
