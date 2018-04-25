@@ -358,7 +358,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         failover_task = self.cluster.async_failover(
             self.servers[:self.nodes_init],
             [node_out],
-            "graceful", wait_for_pending=180)
+            "graceful", wait_for_pending=360)
 
         failover_task.result()
 
