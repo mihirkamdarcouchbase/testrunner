@@ -26,6 +26,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         self.instances = self.input.param("instances", 1)
         self.recovery_type = self.input.param("recovery_type", None)
         self.node_out = self.input.param("node_out", 0)
+        self.threads = self.input.param("threads", 5)
 
     def tearDown(self):
         super(RebalanceHighOpsWithPillowFight, self).tearDown()
@@ -33,20 +34,20 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
     def load_buckets_with_high_ops(self, server, bucket, items, batch=20000,
                                    threads=5, start_document=0, instances=1):
         import subprocess
-        from lib.testconstants import COUCHBASE_FROM_SPOCK
-        cmd_format = "python scripts/high_ops_doc_loader.py  --node {0} --bucket {1} --user {2} --password {3} " \
+        cmd_format = "python scripts/high_ops_doc_gen.py  --node {0} --bucket {1} --user {2} --password {3} " \
                      "--count {4} " \
-                     "--batch_size {5} --threads {6} --start_document {7}"
+                     "--batch_size {5} --threads {6} --start_document {7} --cb_version {8}"
+        cb_version = RestConnection(server).get_nodes_version()[:3]
         if instances > 1:
             cmd = cmd_format.format(server.ip, bucket.name,
                                     server.rest_username, server.rest_password,
                                     int(items) / int(instances), batch, threads,
-                                    start_document)
+                                    start_document, cb_version)
         else:
             cmd = cmd_format.format(server.ip, bucket.name,
                                     server.rest_username, server.rest_password,
                                     items, batch,
-                                    threads, start_document)
+                                    threads, start_document, cb_version)
         if instances > 1:
             for i in range(1, instances):
                 count = int(items) / int(instances)
@@ -58,11 +59,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                          server.rest_username,
                                                          server.rest_password,
                                                          count, batch, threads,
-                                                         start))
-        if RestConnection(server).get_nodes_version()[:5] < '5':
-            cmd = cmd.replace(
-                "--user {0} --password {1} ".format(server.rest_username,
-                                                    server.rest_password), '')
+                                                         start, cb_version))
         self.log.info("Running {}".format(cmd))
         result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE)
@@ -75,7 +72,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             loaded = output.split('\n')[:-1]
             total_loaded = 0
             for load in loaded:
-                total_loaded += int(load)
+                total_loaded += int(load.split(':')[1].strip())
             self.assertEqual(total_loaded, items,
                              "Failed to load {} items. Loaded only {} items".format(
                                  items,
@@ -121,74 +118,62 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                  name="high_ops_load",
                                  args=(self.master, self.buckets[0], num_items,
                                        self.batch_size,
-                                       self.rate_limit, start_document,
+                                       self.threads, start_document,
                                        self.instances))
             return load_thread
+        
+    def check_dataloss_for_high_ops_loader(self, server, bucket, items,
+                                                   batch=20000, threads=5,
+                                                   start_document=0,
+                                                   updated=False, ops=0):
 
-    def check_dataloss_for_high_ops_loader(self, server, bucket, num_items):
-        if RestConnection(server).get_nodes_version()[:5] < '5':
-            bkt = Bucket('couchbase://{0}/{1}'.format(server.ip, bucket.name))
-        else:
-            cluster = Cluster("couchbase://{}".format(server.ip))
-            auth = PasswordAuthenticator(server.rest_username,
-                                         server.rest_password)
-            cluster.authenticate(auth)
-            bkt = cluster.open_bucket(bucket.name)
 
+        import subprocess
+        from lib.memcached.helper.data_helper import VBucketAwareMemcached
+
+        cmd_format = "python scripts/high_ops_doc_gen.py  --node {0} --bucket {1} --user {2} --password {3} " \
+                     "--count {4} " \
+                     "--batch_size {5} --threads {6} --start_document {7} --cb_version {8} --validate"
+        cb_version = RestConnection(server).get_nodes_version()[:3]
+        if updated:
+            cmd_format = "{} --updated --ops {}".format(cmd_format, ops)
+        cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
+                                server.rest_password,
+                                int(items), batch, threads, start_document, cb_version)
+        self.log.info("Running {}".format(cmd))
+        result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+        output = result.stdout.read()
+        error = result.stderr.read()
+        errors = []
         rest = RestConnection(self.master)
         VBucketAware = VBucketAwareMemcached(rest, bucket.name)
         _, _, _ = VBucketAware.request_map(rest, bucket.name)
-        batch_start = 0
-        batch_end = 0
-        batch_size = self.batch_size
-        errors = []
-        while num_items > batch_end:
-            if batch_start + batch_size > num_items:
-                batch_end = num_items
-            else:
-                batch_end = batch_start + batch_size
-            keys = []
-            for i in xrange(batch_start, batch_end, 1):
-                key = "Key_{}".format(i)
-                keys.append(key)
-            try:
-                result = bkt.get_multi(keys)
-                self.log.info(
-                    "Able to fetch keys starting from {0} to {1}".format(
-                        keys[0], keys[len(keys) - 1]))
-                for i in range(batch_start, batch_end):
-                    key = "Key_{}".format(i)
-                    value = {'val': i}
-                    if key in result:
-                        val = result[key].value
-                        for k in value.keys():
-                            if k in val and val[k] == value[k]:
-                                continue
-                            else:
-                                vBucketId = VBucketAware._get_vBucket_id(key)
-                                errors.append((
-                                    "Wrong value for key: {0}, VBucketId: {1}".format(
-                                        key, vBucketId)))
-                    else:
+        if error:
+            self.log.error(error)
+            self.fail("Failed to run the loadgen validator.")
+        if output:
+            loaded = output.split('\n')[:-1]
+            for load in loaded:
+                if "Missing keys:" in load:
+                    keys = load.split(":")[1].strip().replace('[', '').replace(']', '')
+                    keys = keys.split(',')
+                    for key in keys:
+                        key = key.strip()
+                        key = key.replace('\'', []).replace('\\', '')
+                        vBucketId = VBucketAware._get_vBucket_id(key)
+                        errors.append(
+                            ("Missing key: {0}, VBucketId: {1}".format(key, vBucketId)))
+                if "Mismatch keys: " in load:
+                    keys = load.split(":")[1].strip().replace('[', '').replace(']', '')
+                    keys = keys.split(',')
+                    for key in keys:
+                        key = key.strip()
+                        key = key.replace('\'', []).replace('\\', '')
                         vBucketId = VBucketAware._get_vBucket_id(key)
                         errors.append((
-                            "Missing key: {0}, VBucketId: {1}".format(
-                                key, vBucketId)))
-                self.log.info(
-                    "Validated key-values starting from {0} to {1}".format(
-                        keys[0], keys[len(keys) - 1]))
-            except CouchbaseError as e:
-                self.log.error(e)
-                ok, fail = e.split_results()
-                if fail:
-                    for key in fail:
-                        try:
-                            bkt.get(key)
-                        except NotFoundError:
-                            vBucketId = VBucketAware._get_vBucket_id(key)
-                            errors.append("Missing key: {0}, VBucketId: {1}".
-                                          format(key, vBucketId))
-            batch_start += batch_size
+                                      "Wrong value for key: {0}, VBucketId: {1}".format(
+                                          key, vBucketId)))
         return errors
 
     def check_dataloss(self, server, bucket, num_items):
@@ -232,12 +217,17 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             batch_start += batch_size
         return errors
 
-    def check_data(self, server, bucket, num_items=0):
+    def check_data(self, server, bucket, num_items=0, start_document=0,
+                       updated=False, ops=0):
         if self.loader == "pillowfight":
             return self.check_dataloss(server, bucket, num_items)
         elif self.loader == "high_ops":
             return self.check_dataloss_for_high_ops_loader(server, bucket,
-                                                           num_items)
+                                                           num_items,
+                                                           self.batch_size,
+                                                           self.threads,
+                                                           start_document,
+                                                           updated, ops)
 
     '''
     def test_rebalance_in(self):
