@@ -121,7 +121,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                        self.threads, start_document,
                                        self.instances))
             return load_thread
-        
+
     def check_dataloss_for_high_ops_loader(self, server, bucket, items,
                                                    batch=20000, threads=5,
                                                    start_document=0,
@@ -160,7 +160,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                     keys = keys.split(',')
                     for key in keys:
                         key = key.strip()
-                        key = key.replace('\'', []).replace('\\', '')
+                        key = key.replace("\'", []).replace("\\", "")
                         vBucketId = VBucketAware._get_vBucket_id(key)
                         errors.append(
                             ("Missing key: {0}, VBucketId: {1}".format(key, vBucketId)))
