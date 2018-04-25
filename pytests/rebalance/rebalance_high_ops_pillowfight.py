@@ -358,7 +358,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         failover_task = self.cluster.async_failover(
             self.servers[:self.nodes_init],
             [node_out],
-            "graceful", wait_for_pending=60)
+            "graceful", wait_for_pending=180)
 
         failover_task.result()
 
@@ -368,7 +368,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  [], [])
 
-        reached = RestHelper(self.rest).rebalance_reached()
+        reached = RestHelper(rest).rebalance_reached()
         self.assertTrue(reached, "rebalance failed, stuck or did not complete")
         rebalance.result()
         load_thread.join()
