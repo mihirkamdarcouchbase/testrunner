@@ -169,7 +169,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                     keys = keys.split(',')
                     for key in keys:
                         key = key.strip()
-                        key = key.replace('\'', []).replace('\\', '')
+                        key = key.replace("\'", "").replace("\\", "")
                         vBucketId = VBucketAware._get_vBucket_id(key)
                         errors.append((
                                       "Wrong value for key: {0}, VBucketId: {1}".format(
