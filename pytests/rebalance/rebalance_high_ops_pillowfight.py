@@ -160,7 +160,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                     keys = keys.split(',')
                     for key in keys:
                         key = key.strip()
-                        key = key.replace("\'", []).replace("\\", "")
+                        key = key.replace("\'", "").replace("\\", "")
                         vBucketId = VBucketAware._get_vBucket_id(key)
                         errors.append(
                             ("Missing key: {0}, VBucketId: {1}".format(key, vBucketId)))
@@ -280,6 +280,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                     format(num_items_to_validate,
                            rest.get_active_key_count(bucket)))
+        if self.num_replicas > 0:
+            self.assertEqual(num_items_to_validate,
+                             rest.get_replica_key_count(bucket),
+                             "Not all keys present in replica vbuckets")
 
     def test_rebalance_out(self):
         servs_out = [self.servers[self.nodes_init - i - 1] for i in
@@ -309,6 +313,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                     format(num_items_to_validate,
                            rest.get_active_key_count(bucket)))
+        if self.num_replicas > 0:
+            self.assertEqual(num_items_to_validate,
+                             rest.get_replica_key_count(bucket),
+                             "Not all keys present in replica vbuckets")
 
     def test_rebalance_in_out(self):
         servs_out = [self.servers[self.nodes_init - i - 1] for i in
@@ -340,6 +348,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                     format(num_items_to_validate,
                            rest.get_active_key_count(bucket)))
+        if self.num_replicas > 0:
+            self.assertEqual(num_items_to_validate,
+                             rest.get_replica_key_count(bucket),
+                             "Not all keys present in replica vbuckets")
 
     def test_graceful_failover_addback(self):
         node_out = self.servers[self.node_out]
@@ -385,6 +397,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                     format(num_items_to_validate,
                            rest.get_active_key_count(bucket)))
+        if self.num_replicas > 0:
+            self.assertEqual(num_items_to_validate,
+                             rest.get_replica_key_count(bucket),
+                             "Not all keys present in replica vbuckets")
 
     def test_multiple_rebalance_in_out(self):
         servs_out = [self.servers[self.nodes_init - i - 1] for i in
@@ -420,6 +436,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                     format(num_items_to_validate,
                            rest.get_active_key_count(bucket)))
+        if self.num_replicas > 0:
+            self.assertEqual(num_items_to_validate,
+                             rest.get_replica_key_count(bucket),
+                             "Not all keys present in replica vbuckets")
 
         self.log.info('starting the load before rebalance out...')
         load_thread = self.load_docs(num_items=(self.num_items * 2),
@@ -442,6 +462,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                     format(num_items_to_validate,
                            rest.get_active_key_count(bucket)))
+        if self.num_replicas > 0:
+            self.assertEqual(num_items_to_validate,
+                             rest.get_replica_key_count(bucket),
+                             "Not all keys present in replica vbuckets")
 
         self.log.info('starting the load before swap rebalance...')
         load_thread = self.load_docs(num_items=(self.num_items * 2),
@@ -466,3 +490,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                 "FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
                     format(num_items_to_validate,
                            rest.get_active_key_count(bucket)))
+        if self.num_replicas > 0:
+            self.assertEqual(num_items_to_validate,
+                             rest.get_replica_key_count(bucket),
+                             "Not all keys present in replica vbuckets")
