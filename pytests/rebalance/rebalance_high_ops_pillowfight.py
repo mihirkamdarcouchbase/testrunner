@@ -282,8 +282,12 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                            rest.get_active_key_count(bucket)))
         if self.num_replicas > 0:
             self.assertEqual(num_items_to_validate,
-                             rest.get_replica_key_count(bucket),
-                             "Not all keys present in replica vbuckets")
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys present in replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 num_items_to_validate, (
+                                 rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
 
     def test_rebalance_out(self):
         servs_out = [self.servers[self.nodes_init - i - 1] for i in
@@ -315,8 +319,12 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                            rest.get_active_key_count(bucket)))
         if self.num_replicas > 0:
             self.assertEqual(num_items_to_validate,
-                             rest.get_replica_key_count(bucket),
-                             "Not all keys present in replica vbuckets")
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys present in replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 num_items_to_validate, (
+                                 rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
 
     def test_rebalance_in_out(self):
         servs_out = [self.servers[self.nodes_init - i - 1] for i in
@@ -350,8 +358,12 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                            rest.get_active_key_count(bucket)))
         if self.num_replicas > 0:
             self.assertEqual(num_items_to_validate,
-                             rest.get_replica_key_count(bucket),
-                             "Not all keys present in replica vbuckets")
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys present in replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 num_items_to_validate, (
+                                 rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
 
     def test_graceful_failover_addback(self):
         node_out = self.servers[self.node_out]
@@ -399,8 +411,12 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                            rest.get_active_key_count(bucket)))
         if self.num_replicas > 0:
             self.assertEqual(num_items_to_validate,
-                             rest.get_replica_key_count(bucket),
-                             "Not all keys present in replica vbuckets")
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys present in replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 num_items_to_validate, (
+                                 rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
 
     def test_multiple_rebalance_in_out(self):
         servs_out = [self.servers[self.nodes_init - i - 1] for i in
@@ -438,8 +454,12 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                            rest.get_active_key_count(bucket)))
         if self.num_replicas > 0:
             self.assertEqual(num_items_to_validate,
-                             rest.get_replica_key_count(bucket),
-                             "Not all keys present in replica vbuckets")
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys present in replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 num_items_to_validate, (
+                                 rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
 
         self.log.info('starting the load before rebalance out...')
         load_thread = self.load_docs(num_items=(self.num_items * 2),
@@ -464,8 +484,12 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                            rest.get_active_key_count(bucket)))
         if self.num_replicas > 0:
             self.assertEqual(num_items_to_validate,
-                             rest.get_replica_key_count(bucket),
-                             "Not all keys present in replica vbuckets")
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys present in replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 num_items_to_validate, (
+                                 rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
 
         self.log.info('starting the load before swap rebalance...')
         load_thread = self.load_docs(num_items=(self.num_items * 2),
@@ -492,5 +516,9 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                            rest.get_active_key_count(bucket)))
         if self.num_replicas > 0:
             self.assertEqual(num_items_to_validate,
-                             rest.get_replica_key_count(bucket),
-                             "Not all keys present in replica vbuckets")
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys present in replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 num_items_to_validate, (
+                                 rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
