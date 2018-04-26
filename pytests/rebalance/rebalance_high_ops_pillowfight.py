@@ -143,7 +143,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
     def check_dataloss_for_high_ops_loader(self, server, bucket, items,
                                            batch=20000, threads=5,
                                            start_document=0,
-                                           updated=False, ops=0):
+                                           updated=False, ops=0, ttl=0):
         import subprocess
         from lib.memcached.helper.data_helper import VBucketAwareMemcached
 
@@ -153,6 +153,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         cb_version = RestConnection(server).get_nodes_version()[:3]
         if updated:
             cmd_format = "{} --updated --ops {}".format(cmd_format, ops)
+        if ttl > 0:
+            cmd_format = "{} --ttl {}".format(cmd_format, ttl)
         cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
                                 server.rest_password,
                                 int(items), batch, threads, start_document, cb_version)
@@ -234,7 +236,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         return errors
 
     def check_data(self, server, bucket, num_items=0, start_document=0,
-                       updated=False, ops=0, batch_size=0):
+                       updated=False, ops=0, batch_size=0, ttl=0):
         if batch_size == 0:
             batch_size = self.batch_size
         if self.loader == "pillowfight":
@@ -245,7 +247,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                            self.batch_size,
                                                            self.threads,
                                                            start_document,
-                                                           updated, ops)
+                                                           updated, ops, ttl)
 
     '''
     def test_rebalance_in(self):
@@ -360,6 +362,9 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         load_thread.start()
         load_thread.join()
 
+        # Allow docs to expire
+        self.sleep(15)
+
         validate_thread = Thread(target=self.check_data,
                                name="update_high_ops_load",
                                args=(self.master, bucket, self.num_items, 0, False, 0, 100))
@@ -373,8 +378,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         validate_thread.join()
 
         num_items_to_validate = self.num_items
-        errors = self.check_data(self.master, bucket, num_items_to_validate, 0,
-                                 True, self.num_items * 2)
+        errors = self.check_data(self.master, bucket, num_items_to_validate, ttl=10)
         if errors:
             self.log.info("Printing missing keys:")
         for error in errors:
