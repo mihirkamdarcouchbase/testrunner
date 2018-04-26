@@ -35,14 +35,31 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                    threads=5, start_document=0, instances=1):
         import subprocess
         cmd_format = "python scripts/high_ops_doc_gen.py  --node {0} --bucket {1} --user {2} --password {3} " \
-                     "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --instances {9}"
+                     "--count {4} " \
+                     "--batch_size {5} --threads {6} --start_document {7} --cb_version {8}"
         cb_version = RestConnection(server).get_nodes_version()[:3]
-        if self.num_replicas > 0:
-            cmd_format = "{} --replicate_to 1".format(cmd_format)
-        cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
-                                server.rest_password,
-                                items, batch, threads, start_document,
-                                cb_version, instances)
+        if instances > 1:
+            cmd = cmd_format.format(server.ip, bucket.name,
+                                    server.rest_username, server.rest_password,
+                                    int(items) / int(instances), batch, threads,
+                                    start_document, cb_version)
+        else:
+            cmd = cmd_format.format(server.ip, bucket.name,
+                                    server.rest_username, server.rest_password,
+                                    items, batch,
+                                    threads, start_document, cb_version)
+        if instances > 1:
+            for i in range(1, instances):
+                count = int(items) / int(instances)
+                start = count * i + int(start_document)
+                if i == instances - 1:
+                    count = items - (count * i)
+                cmd = "{} & {}".format(cmd,
+                                       cmd_format.format(server.ip, bucket.name,
+                                                         server.rest_username,
+                                                         server.rest_password,
+                                                         count, batch, threads,
+                                                         start, cb_version))
         self.log.info("Running {}".format(cmd))
         result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE)
@@ -59,38 +76,6 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             self.assertEqual(total_loaded, items,
                              "Failed to load {} items. Loaded only {} items".format(
                                  items,
-                                 total_loaded))
-
-    def update_buckets_with_high_ops(self, server, bucket, items, ops,
-                                     batch=20000, threads=5, start_document=0,
-                                     instances=1):
-        import subprocess
-        cmd_format = "python scripts/high_ops_doc_gen.py  --node {0} --bucket {1} --user {2} --password {3} " \
-                     "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --instances {" \
-                     "9} --ops {10} --updates"
-        cb_version = RestConnection(server).get_nodes_version()[:3]
-        if self.num_replicas > 0:
-            cmd_format = "{} --replicate_to 1".format(cmd_format)
-        cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
-                                server.rest_password,
-                                items, batch, threads, start_document,
-                                cb_version, instances, ops)
-        self.log.info("Running {}".format(cmd))
-        result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE)
-        output = result.stdout.read()
-        error = result.stderr.read()
-        if error:
-            self.log.error(error)
-            self.fail("Failed to run the loadgen.")
-        if output:
-            loaded = output.split('\n')[:-1]
-            total_loaded = 0
-            for load in loaded:
-                total_loaded += int(load.split(':')[1].strip())
-            self.assertEqual(total_loaded, ops,
-                             "Failed to update {} items. Loaded only {} items".format(
-                                 ops,
                                  total_loaded))
 
     def load(self, server, items, batch=1000, docsize=100, rate_limit=100000,
@@ -138,9 +123,9 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             return load_thread
 
     def check_dataloss_for_high_ops_loader(self, server, bucket, items,
-                                           batch=20000, threads=5,
-                                           start_document=0,
-                                           updated=False, ops=0):
+                                                   batch=20000, threads=5,
+                                                   start_document=0,
+                                                   updated=False, ops=0):
 
 
         import subprocess
@@ -175,7 +160,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                     keys = keys.split(',')
                     for key in keys:
                         key = key.strip()
-                        key = key.replace('\'', '').replace('\\', '')
+                        key = key.replace("\'", "").replace("\\", "")
                         vBucketId = VBucketAware._get_vBucket_id(key)
                         errors.append(
                             ("Missing key: {0}, VBucketId: {1}".format(key, vBucketId)))
@@ -184,7 +169,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                     keys = keys.split(',')
                     for key in keys:
                         key = key.strip()
-                        key = key.replace('\'', '').replace('\\', '')
+                        key = key.replace("\'", "").replace("\\", "")
                         vBucketId = VBucketAware._get_vBucket_id(key)
                         errors.append((
                                       "Wrong value for key: {0}, VBucketId: {1}".format(

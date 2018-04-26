@@ -1,10 +1,8 @@
 from copy import deepcopy
 from couchbase.cluster import Cluster, PasswordAuthenticator
-from couchbase.bucket import Bucket, CouchbaseTransientError, KeyExistsError, LOCKMODE_WAIT, CouchbaseError, \
-    ArgumentError
+from couchbase.bucket import Bucket, CouchbaseTransientError, KeyExistsError, LOCKMODE_WAIT, CouchbaseError
 import threading
 import argparse
-import multiprocessing
 
 def parseArguments():
     parser = argparse.ArgumentParser(description='Update some docs in a bucket using the couchbase python client')
@@ -26,10 +24,6 @@ def parseArguments():
     parser.add_argument('--validate', default=False, action='store_true', help="Validate the documents")
     parser.add_argument('--updated', default=False, action='store_true', help="Was updated performed on documents "
                                                                               "before validation")
-    parser.add_argument('--replicate_to', default=0, type=int, help="Perform durability checking on this many "
-                                                                    "replicas for presence in memory")
-    parser.add_argument('--instances', default=1, type=int, help="Create multiple instances of the generator for " \
-                                                                  "more ops per sec")
     return parser.parse_args()
 
 class Document:
@@ -52,10 +46,9 @@ class Simple_Doc_gen():
             cluster = Cluster("couchbase://{}".format(self.host))
             auth = PasswordAuthenticator(self.user, self.password)
             cluster.authenticate(auth)
-            self.bucket = cluster.open_bucket(self.bucket_name, lockmode=LOCKMODE_WAIT, unlock_gil=True)
+            self.bucket = cluster.open_bucket(self.bucket_name, lockmode=LOCKMODE_WAIT)
         else:
-            self.bucket = Bucket('couchbase://{0}/{1}'.format(self.host, self.bucket_name), lockmode=LOCKMODE_WAIT,
-                                 unlock_gil=True)
+            self.bucket = Bucket('couchbase://{0}/{1}'.format(self.host, self.bucket_name), lockmode=LOCKMODE_WAIT)
         self.bucket.timeout = args.timeout
         self.num_items = int(args.count)
         self.num_of_ops = int(args.ops)
@@ -66,7 +59,6 @@ class Simple_Doc_gen():
         self.updates = args.updates
         self.validate = args.validate
         self.updated = args.updated
-        self.replicate_to = int(args.replicate_to)
         self.size = int(args.size)
         self.batches = []
         self.all_batches = []
@@ -77,8 +69,6 @@ class Simple_Doc_gen():
         self.ops_to_items_ratio = int(self.num_of_ops) / int(self.num_items)
         self.wrong_keys = []
         self.missing_key_val = []
-        self.wrong_keys_replica = []
-        self.missing_key_val_replica = []
 
     def create_create_batches(self):
         for i in range(self.start_document, self.start_document + self.num_items, self.batch_size):
@@ -156,9 +146,9 @@ class Simple_Doc_gen():
             keys.append('Key_{}'.format(i))
         return keys
 
-    def get_items(self, keys, replica=False):
+    def get_items(self, keys):
         try:
-            result = self.bucket.get_multi(keys, replica=replica)
+            result = self.bucket.get_multi(keys)
             return result
         except CouchbaseError as e:
             ok, fail = e.split_results()
@@ -166,12 +156,9 @@ class Simple_Doc_gen():
 
     def insert_items(self, items):
         try:
-            result = self.bucket.upsert_multi(items, replicate_to=self.replicate_to)
+            result = self.bucket.upsert_multi(items)
             return result.__len__()
-        except ArgumentError:
-            self.replicate_to = 0
-            return self.insert_items(items)
-        except CouchbaseError as e:
+        except CouchbaseTransientError as e:
             ok, fail = e.split_results()
             num_completed = ok.__len__()
             for key in fail:
@@ -196,9 +183,9 @@ class Simple_Doc_gen():
         self.thread_lock.release()
         return completed
 
-    def validate_items(self, start, end, replica=False):
+    def validate_items(self, start, end):
         keys = self.get_keys(start, end)
-        result = self.get_items(keys, replica=replica)
+        result = self.get_items(keys)
         for i in range(start, end):
             key = "Key_{}".format(i)
             document = Document(i, self.size)
@@ -216,15 +203,9 @@ class Simple_Doc_gen():
                     if k in val and val[k] == value[k]:
                         continue
                     else:
-                        if replica:
-                            self.wrong_keys_replica.append(key)
-                        else:
-                            self.wrong_keys.append(key)
+                        self.wrong_keys.append(key)
             else:
-                if replica:
-                    self.missing_key_val_replica.append(key)
-                else:
-                    self.missing_key_val.append(key)
+                self.missing_key_val.append(key)
 
     def validate_thread(self):
         self.thread_lock.acquire()
@@ -235,8 +216,6 @@ class Simple_Doc_gen():
             return
         self.thread_lock.release()
         self.validate_items(batch['start'], batch['end'])
-        if self.replicate_to:
-            self.validate_items(batch['start'], batch['end'], replica=True)
 
     def run_create_load_gen(self):
         self.create_create_batches()
@@ -297,79 +276,15 @@ class Simple_Doc_gen():
             print "Updated documents: {}".format(self.num_completed)
         elif self.validate:
             self.run_validate_load_gen()
-            if self.missing_key_val:
-                print "Missing keys count: {}".format(self.missing_key_val.__len__())
-                print "Missing keys: {}".format(self.missing_key_val.__str__())
-            if self.wrong_keys:
-                print "Mismatch keys count: {}".format(self.wrong_keys.__len__())
-                print "Mismatch keys: {}".format(self.wrong_keys.__str__())
-            if not self.missing_key_val and not self.wrong_keys:
-                print "Validated documents: {}".format(self.num_items)
+            print "Missing keys count: {}".format(self.missing_key_val.__len__())
+            print "Mismatch keys count: {}".format(self.wrong_keys.__len__())
+            print "Missing keys: {}".format(self.missing_key_val.__str__())
+            print "Mismatch keys: {}".format(self.wrong_keys.__str__())
         else:
             self.run_create_load_gen()
             print "Created documents: {}".format(self.num_completed)
 
 if __name__ == "__main__":
     args = parseArguments()
-    if int(args.instances) == 1 or bool(args.validate):
-        doc_loader = Simple_Doc_gen(args)
-        doc_loader.generate()
-    else:
-        workers = []
-        arguments = []
-        instances = int(args.instances)
-        if bool(args.updates):
-            if int(args.count) > int(args.ops):
-                items = int(args.count) - int(args.ops)
-                for i in range(0, instances):
-                    arg = deepcopy(args)
-                    count = int(items) / int(instances)
-                    start = count * i + int(arg.start_document)
-                    if i == instances - 1:
-                        count = items - (count * i)
-                    arg.count = count
-                    arg.ops = count
-                    arg.start_document = start
-                    arguments.append(arg)
-            else:
-                ops_to_items_ratio = int(args.ops) / int(args.count)
-                for i in range(0, instances):
-                    arg = deepcopy(args)
-                    items = int(args.count) / instances
-                    start = items * i + int(arg.start_document)
-                    ops = items * ops_to_items_ratio
-                    if i == instances - 1:
-                        items = int(args.count) - (items * i)
-                        ops = items * ops_to_items_ratio
-                    arg.count = items
-                    arg.ops = ops
-                    arg.start_document = start
-                    arguments.append(arg)
-                if int(args.ops) > int(args.count) * ops_to_items_ratio:
-                    remaining_ops = int(args.ops) - (int(args.count) * ops_to_items_ratio)
-                    ops_per_instance = int(args.count) / instances
-                    num_of_instance_to_change = remaining_ops / ops_per_instance
-                    for i in range(0, num_of_instance_to_change):
-                        arg = arguments[i]
-                        arg.ops += ops_per_instance
-                    if remaining_ops > ops_per_instance * num_of_instance_to_change:
-                        arg = arguments[num_of_instance_to_change]
-                        arg.ops += (remaining_ops - (ops_per_instance * num_of_instance_to_change))
-        else:
-            for i in range(0, instances):
-                arg = deepcopy(args)
-                items = int(arg.count) / instances
-                start = items * i + int(arg.start_document)
-                if i == instances - 1:
-                    items = int(arg.count) - (items * i)
-                arg.count = items
-                arg.start_document = start
-                arguments.append(arg)
-        for i in range(0, instances):
-            arg = arguments[i]
-            doc_loader = Simple_Doc_gen(arg)
-            worker = multiprocessing.Process(target=doc_loader.generate, name="Worker {}".format(i))
-            workers.append(worker)
-            worker.start()
-        for worker in workers:
-            worker.join()
+    doc_loader = Simple_Doc_gen(args)
+    doc_loader.generate()
