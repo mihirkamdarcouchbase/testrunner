@@ -1,7 +1,7 @@
 from copy import deepcopy
 from couchbase.cluster import Cluster, PasswordAuthenticator
 from couchbase.bucket import Bucket, LOCKMODE_WAIT, CouchbaseError, \
-    ArgumentError
+    ArgumentError, NotFoundError
 import argparse
 import multiprocessing
 from multiprocessing.dummy import Pool
@@ -32,6 +32,10 @@ def parseArguments():
     parser.add_argument('--instances', default=1, type=int, help="Create multiple instances of the generator for "
                                                                  "more ops per sec")
     parser.add_argument('--ttl', default=0, type=int, help="Set expiry timer for documents")
+    parser.add_argument('--delete', default=False, action='store_true', help="Delete documents from bucket")
+    parser.add_argument('--deleted', default=False, action='store_true', help="Was delete of documents run before "
+                                                                              "validation")
+    parser.add_argument('--deleted_items', default=0, type=int, help="Number of documents that were deleted")
     return parser.parse_args()
 
 
@@ -64,6 +68,9 @@ class SimpleDocGen:
         self.size = int(args.size)
         self.timeout = int(args.timeout)
         self.ttl = int(args.ttl)
+        self.delete = args.delete
+        self.deleted = args.deleted
+        self.deleted_items = int(args.deleted_items)
         self.connections = []
         self.batches = []
         self.all_batches = []
@@ -125,6 +132,16 @@ class SimpleDocGen:
                         last_batch.append({"start": i, "end": i + self.batch_size})
                 self.all_batches.append(last_batch)
 
+    def create_delete_batches(self):
+        if self.num_items < self.num_of_ops:
+            self.num_of_ops = self.num_items
+        for i in range(self.start_document, self.start_document + self.num_of_ops, self.batch_size):
+            if i + self.batch_size > self.start_document + self.num_of_ops:
+                self.batches.append({"start": i, "end": self.start_document + self.num_of_ops})
+            else:
+                self.batches.append({"start": i, "end": i + self.batch_size})
+                self.all_batches.append(self.batches)
+
     def get_create_items(self, start, end):
         items = {}
         for x in range(start, end):
@@ -162,6 +179,10 @@ class SimpleDocGen:
             items[item] = document.__dict__
         return items
 
+    def get_delete_retry_keys(self):
+        items = self.retry_batches
+        return items
+
     def get_keys(self, start, end):
         keys = []
         for i in range(start, end):
@@ -191,6 +212,19 @@ class SimpleDocGen:
             self.key_exists_error += 1
             return num_completed
 
+    def delete_items(self, connection, keys):
+        try:
+            result = connection.remove_multi(keys)
+            return result.__len__()
+        except NotFoundError as e:
+            pass
+        except CouchbaseError as e:
+            ok, fail = e.split_results()
+            for key in fail:
+                self.retry_batches.append(key)
+            self.key_exists_error += 1
+            return ok.__len__()
+
     def insert_thread(self, connection, batch, update=False):
         if update:
             items = self.get_update_items(batch['start'], batch['end'])
@@ -214,7 +248,6 @@ class SimpleDocGen:
                     else:
                         self.missing_key_val.append(key)
                         return
-
             else:
                 return
         for i in range(start, end):
@@ -229,6 +262,12 @@ class SimpleDocGen:
                 document.update = self.current_update_counter
             value = document.__dict__
             if key in result:
+                if self.deleted and self.deleted_items > int(key.split("_")[1]):
+                    if replica:
+                        self.missing_key_val_replica.append(key)
+                    else:
+                        self.missing_key_val.append(key)
+                    continue
                 val = result[key].value
                 for k in value.keys():
                     if k in val and val[k] == value[k]:
@@ -239,6 +278,8 @@ class SimpleDocGen:
                         else:
                             self.wrong_keys.append(key)
             else:
+                if self.deleted and self.deleted_items > int(key.split("_")[1]):
+                    continue
                 if replica:
                     self.missing_key_val_replica.append(key)
                 else:
@@ -251,6 +292,14 @@ class SimpleDocGen:
 
     def validate_thread_pool(self, args):
         return self.validate_thread(*args)
+
+    def delete_thread(self, connection, batch):
+        keys = self.get_keys(batch['start'], batch['end'])
+        completed = self.delete_items(connection, keys)
+        return completed
+
+    def delete_thread_pool(self, args):
+        return self.delete_thread(*args)
 
     def run_create_load_gen(self):
         self.create_create_batches()
@@ -312,6 +361,25 @@ class SimpleDocGen:
         thread_pool.close()
         thread_pool.join()
 
+    def run_delete_load_gen(self):
+        self.create_delete_batches()
+        args = []
+        num_of_connections_available = self.connections.__len__()
+        for i in range(0, self.batches.__len__()):
+            connection = self.connections[i % num_of_connections_available]
+            args.append((connection, self.batches[i]))
+        thread_pool = Pool(self.threads)
+        result = thread_pool.map(self.delete_thread_pool, args)
+        thread_pool.close()
+        thread_pool.join()
+        for res in result:
+            self.num_completed += res
+        while self.retry_batches:
+            keys = self.get_delete_retry_keys()
+            self.retry_batches = []
+            completed = self.delete_items(self.connections[0], keys)
+            self.num_completed += completed
+
     def generate(self):
         if self.updates:
             self.run_update_load_gen()
@@ -324,8 +392,17 @@ class SimpleDocGen:
             if self.wrong_keys:
                 print "Mismatch keys count: {}".format(self.wrong_keys.__len__())
                 print "Mismatch keys: {}".format(self.wrong_keys.__str__())
+            if self.replicate_to > 0 and self.missing_key_val_replica:
+                print "Missing keys count from replicas: {}".format(self.missing_key_val_replica.__len__())
+                print "Missing keys from replicas: {}".format(self.missing_key_val_replica.__str__())
+            if self.replicate_to > 0 and self.wrong_keys_replica:
+                print "Mismatch keys count from replicas: {}".format(self.wrong_keys_replica.__len__())
+                print "Mismatch keys from replicas: {}".format(self.wrong_keys_replica.__str__())
             if not self.missing_key_val and not self.wrong_keys:
                 print "Validated documents: {}".format(self.num_items)
+        elif self.delete:
+            self.run_delete_load_gen()
+            print "Deleted documents: {}".format(self.num_completed)
         else:
             self.run_create_load_gen()
             print "Created documents: {}".format(self.num_completed)
@@ -376,6 +453,18 @@ if __name__ == "__main__":
                     if remaining_ops > ops_per_instance * num_of_instance_to_change:
                         arg = arguments[num_of_instance_to_change]
                         arg.ops += (remaining_ops - (ops_per_instance * num_of_instance_to_change))
+        elif bool(args.delete):
+            if int(args.count) < int(args.ops):
+                args.ops = int(args.count)
+            for i in range(0, instances):
+                arg = deepcopy(args)
+                items = int(arg.ops) / instances
+                start = items * i + int(arg.start_document)
+                if i == instances - 1:
+                    items = int(arg.ops) - (items * i)
+                arg.ops = items
+                arg.start_document = start
+                arguments.append(arg)
         else:
             for i in range(0, instances):
                 arg = deepcopy(args)

@@ -94,6 +94,40 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                  ops,
                                  total_loaded))
 
+    def delete_buckets_with_high_ops(self, server, bucket, items, ops,
+                                     batch=20000, threads=5,
+                                     start_document=0,
+                                     instances=1):
+        import subprocess
+
+        cmd_format = "python scripts/high_ops_doc_gen.py  --node {0} --bucket {1} --user {2} --password {3} " \
+                     "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --instances {" \
+                     "9} --ops {10} --delete"
+        cb_version = RestConnection(server).get_nodes_version()[:3]
+        if self.num_replicas > 0:
+            cmd_format = "{} --replicate_to 1".format(cmd_format)
+        cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
+                                server.rest_password,
+                                items, batch, threads, start_document,
+                                cb_version, instances, ops)
+        self.log.info("Running {}".format(cmd))
+        result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+        output = result.stdout.read()
+        error = result.stderr.read()
+        if error:
+            self.log.error(error)
+            self.fail("Failed to run the loadgen.")
+        if output:
+            loaded = output.split('\n')[:-1]
+            total_loaded = 0
+            for load in loaded:
+                total_loaded += int(load.split(':')[1].strip())
+            self.assertEqual(total_loaded, ops,
+                             "Failed to update {} items. Loaded only {} items".format(
+                                 ops,
+                                 total_loaded))
+
     def load(self, server, items, batch=1000, docsize=100, rate_limit=100000,
              start_at=0):
         import subprocess
@@ -143,7 +177,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
     def check_dataloss_for_high_ops_loader(self, server, bucket, items,
                                            batch=20000, threads=5,
                                            start_document=0,
-                                           updated=False, ops=0, ttl=0):
+                                           updated=False, ops=0, ttl=0, deleted=False, deleted_items=0):
         import subprocess
         from lib.memcached.helper.data_helper import VBucketAwareMemcached
 
@@ -153,6 +187,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         cb_version = RestConnection(server).get_nodes_version()[:3]
         if updated:
             cmd_format = "{} --updated --ops {}".format(cmd_format, ops)
+        if deleted:
+            cmd_format = "{} --deleted --deleted_items {}".format(cmd_format, deleted_items)
         if ttl > 0:
             cmd_format = "{} --ttl {}".format(cmd_format, ttl)
         cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
@@ -236,7 +272,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         return errors
 
     def check_data(self, server, bucket, num_items=0, start_document=0,
-                       updated=False, ops=0, batch_size=0, ttl=0):
+                   updated=False, ops=0, batch_size=0, ttl=0, deleted=False,
+                   deleted_items=0):
         if batch_size == 0:
             batch_size = self.batch_size
         if self.loader == "pillowfight":
@@ -247,7 +284,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                            self.batch_size,
                                                            self.threads,
                                                            start_document,
-                                                           updated, ops, ttl)
+                                                           updated, ops, ttl,
+                                                           deleted, deleted_items)
 
     '''
     def test_rebalance_in(self):
@@ -350,6 +388,54 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                              (rest.get_replica_key_count(
                                  bucket) / self.num_replicas),
                              "Not all keys present in replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 num_items_to_validate, (
+                                     rest.get_replica_key_count(
+                                         bucket) / self.num_replicas)))
+
+    def test_rebalance_in_with_delete_workload(self):
+        rest = RestConnection(self.master)
+        bucket = rest.get_buckets()[0]
+        load_thread = self.load_docs()
+        self.log.info('starting the load thread...')
+        load_thread.start()
+        load_thread.join()
+
+        delete_thread = Thread(target=self.delete_buckets_with_high_ops,
+                               name="delete_high_ops_load",
+                               args=(
+                               self.master, self.buckets[0], self.num_items,
+                               self.num_items, self.batch_size,
+                               self.threads, 0, self.instances))
+
+        delete_thread.start()
+        rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
+                                                 self.servers[
+                                                 self.nodes_init:self.nodes_init + self.nodes_in],
+                                                 [])
+        rebalance.result()
+        delete_thread.join()
+        num_items_to_validate = self.num_items
+        errors = self.check_data(self.master, bucket, num_items_to_validate, 0,
+                                 deleted=True, deleted_items=num_items_to_validate)
+        if errors:
+            self.log.info("Printing missing keys:")
+        for error in errors:
+            print error
+        if rest.get_active_key_count(bucket) != 0:
+            self.fail(
+                "FATAL: Data loss detected!! Docs Deleted : {0}, docs present: {1}".
+                    format(num_items_to_validate,
+                           rest.get_active_key_count(bucket)))
+        else:
+            if errors:
+                self.fail(
+                    "FATAL : Few mutations missed. See above for details.")
+
+        if self.num_replicas > 0:
+            self.assertEqual(0,
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys deleted from replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
                                  num_items_to_validate, (
                                      rest.get_replica_key_count(
                                          bucket) / self.num_replicas)))
@@ -485,6 +571,56 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                      rest.get_replica_key_count(
                                          bucket) / self.num_replicas)))
 
+    def test_rebalance_out_with_expiry(self):
+        servs_out = [self.servers[self.nodes_init - i - 1] for i in
+                     range(self.nodes_out)]
+        rest = RestConnection(self.master)
+        bucket = rest.get_buckets()[0]
+        load_thread = self.load_docs(ttl=10)
+        self.log.info('starting the load thread...')
+        load_thread.start()
+        load_thread.join()
+
+        # Allow docs to expire
+        self.sleep(15)
+
+        validate_thread = Thread(target=self.check_data,
+                                 name="update_high_ops_load",
+                                 args=(
+                                 self.master, bucket, self.num_items, 0, False,
+                                 0, 100))
+
+        validate_thread.start()
+        rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
+                                                 [], servs_out)
+        rebalance.result()
+        validate_thread.join()
+
+        num_items_to_validate = self.num_items
+        errors = self.check_data(self.master, bucket, num_items_to_validate,
+                                 ttl=10)
+        if errors:
+            self.log.info("Printing missing keys:")
+        for error in errors:
+            print error
+        if rest.get_active_key_count(bucket) != 0:
+            self.fail(
+                "FATAL: Data loss detected!! Docs expired : {0}, docs present: {1}".
+                    format(num_items_to_validate,
+                           rest.get_active_key_count(bucket)))
+        else:
+            if errors:
+                self.fail(
+                    "FATAL : Few mutations missed. See above for details.")
+
+        if self.num_replicas > 0:
+            self.assertEqual(0,
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys deleted from replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 0, (rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
+
     def test_rebalance_in_out(self):
         servs_out = [self.servers[self.nodes_init - i - 1] for i in
                      range(self.nodes_out)]
@@ -573,6 +709,59 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                  num_items_to_validate, (
                                      rest.get_replica_key_count(
                                          bucket) / self.num_replicas)))
+
+    def test_rebalance_in_out_with_expiry(self):
+        servs_out = [self.servers[self.nodes_init - i - 1] for i in
+                     range(self.nodes_out)]
+        rest = RestConnection(self.master)
+        bucket = rest.get_buckets()[0]
+        load_thread = self.load_docs(ttl=10)
+        self.log.info('starting the load thread...')
+        load_thread.start()
+        load_thread.join()
+
+        # Allow docs to expire
+        self.sleep(15)
+
+        validate_thread = Thread(target=self.check_data,
+                                 name="update_high_ops_load",
+                                 args=(
+                                     self.master, bucket, self.num_items, 0,
+                                     False,
+                                     0, 100))
+
+        validate_thread.start()
+        rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
+                                                 self.servers[
+                                                 self.nodes_init:self.nodes_init + self.nodes_in],
+                                                 servs_out)
+        rebalance.result()
+        validate_thread.join()
+
+        num_items_to_validate = self.num_items
+        errors = self.check_data(self.master, bucket, num_items_to_validate,
+                                 ttl=10)
+        if errors:
+            self.log.info("Printing missing keys:")
+        for error in errors:
+            print error
+        if rest.get_active_key_count(bucket) != 0:
+            self.fail(
+                "FATAL: Data loss detected!! Docs expired : {0}, docs present: {1}".
+                    format(num_items_to_validate,
+                           rest.get_active_key_count(bucket)))
+        else:
+            if errors:
+                self.fail(
+                    "FATAL : Few mutations missed. See above for details.")
+
+        if self.num_replicas > 0:
+            self.assertEqual(0,
+                             (rest.get_replica_key_count(
+                                 bucket) / self.num_replicas),
+                             "Not all keys deleted from replica vbuckets. Expected No. of items : {0}, Item count per replica: {1}".format(
+                                 0, (rest.get_replica_key_count(
+                                     bucket) / self.num_replicas)))
 
     def test_graceful_failover_addback(self):
         node_out = self.servers[self.node_out]
