@@ -1,10 +1,11 @@
 from copy import deepcopy
 from couchbase.cluster import Cluster, PasswordAuthenticator
-from couchbase.bucket import Bucket, CouchbaseTransientError, KeyExistsError, LOCKMODE_WAIT, CouchbaseError, \
+from couchbase.bucket import Bucket, LOCKMODE_WAIT, CouchbaseError, \
     ArgumentError
-import threading
 import argparse
 import multiprocessing
+from multiprocessing.dummy import Pool
+
 
 def parseArguments():
     parser = argparse.ArgumentParser(description='Update some docs in a bucket using the couchbase python client')
@@ -12,9 +13,9 @@ def parseArguments():
     parser.add_argument('--batch_size', default=5000, help="Batch size of eatch inserts")
     parser.add_argument('--node', '-n', default="localhost", help='Cluster Node to connect to')
     parser.add_argument('--bucket', '-b', default="default", help='Bucket to connect to')
-    parser.add_argument('--password', '-p',default="password", help='User password')
-    parser.add_argument('--user', '-u',default="Administrator", help='Username')
-    parser.add_argument('--prefix', '-k',default="CBPY_", help='Key Prefix')
+    parser.add_argument('--password', '-p', default="password", help='User password')
+    parser.add_argument('--user', '-u', default="Administrator", help='Username')
+    parser.add_argument('--prefix', '-k', default="CBPY_", help='Key Prefix')
     parser.add_argument('--timeout', '-t', default=5, type=int, help='Operation Timeout')
     parser.add_argument('--count', '-c', default=1000, type=int, help='Number of documents in the bucket already')
     parser.add_argument('--ops', default=1000, type=int, help='Number of mutations to perform')
@@ -28,9 +29,11 @@ def parseArguments():
                                                                               "before validation")
     parser.add_argument('--replicate_to', default=0, type=int, help="Perform durability checking on this many "
                                                                     "replicas for presence in memory")
-    parser.add_argument('--instances', default=1, type=int, help="Create multiple instances of the generator for " \
-                                                                  "more ops per sec")
+    parser.add_argument('--instances', default=1, type=int, help="Create multiple instances of the generator for "
+                                                                 "more ops per sec")
+    parser.add_argument('--ttl', default=0, type=int, help="Set expiry timer for documents")
     return parser.parse_args()
+
 
 class Document:
     def __init__(self, value, size):
@@ -40,23 +43,14 @@ class Document:
         self.update = 0
         self.body = body
 
-class Simple_Doc_gen():
 
+class SimpleDocGen:
     def __init__(self, args):
         self.host = args.node
         self.bucket_name = args.bucket
         self.user = args.user
         self.password = args.password
         self.cb_version = args.cb_version
-        if self.cb_version > '5':
-            cluster = Cluster("couchbase://{}".format(self.host))
-            auth = PasswordAuthenticator(self.user, self.password)
-            cluster.authenticate(auth)
-            self.bucket = cluster.open_bucket(self.bucket_name, lockmode=LOCKMODE_WAIT, unlock_gil=True)
-        else:
-            self.bucket = Bucket('couchbase://{0}/{1}'.format(self.host, self.bucket_name), lockmode=LOCKMODE_WAIT,
-                                 unlock_gil=True)
-        self.bucket.timeout = args.timeout
         self.num_items = int(args.count)
         self.num_of_ops = int(args.ops)
         self.batch_size = int(args.batch_size)
@@ -68,17 +62,35 @@ class Simple_Doc_gen():
         self.updated = args.updated
         self.replicate_to = int(args.replicate_to)
         self.size = int(args.size)
+        self.timeout = int(args.timeout)
+        self.ttl = int(args.ttl)
+        self.connections = []
         self.batches = []
         self.all_batches = []
         self.retry_batches = []
         self.num_completed = 0
         self.key_exists_error = 0
-        self.thread_lock = threading.Lock()
         self.ops_to_items_ratio = int(self.num_of_ops) / int(self.num_items)
         self.wrong_keys = []
         self.missing_key_val = []
         self.wrong_keys_replica = []
         self.missing_key_val_replica = []
+        self.create_connections()
+
+    def create_connections(self):
+        for i in range(0, self.threads):
+            if self.cb_version > '5':
+                cluster = Cluster("couchbase://{}".format(self.host))
+                auth = PasswordAuthenticator(self.user, self.password)
+                cluster.authenticate(auth)
+                bucket = cluster.open_bucket(self.bucket_name, lockmode=LOCKMODE_WAIT, unlock_gil=True)
+                bucket.timeout = self.timeout
+                self.connections.append(bucket)
+            else:
+                bucket = Bucket('couchbase://{0}/{1}'.format(self.host, self.bucket_name), lockmode=LOCKMODE_WAIT,
+                                unlock_gil=True)
+                bucket.timeout = self.timeout
+                self.connections.append(bucket)
 
     def create_create_batches(self):
         for i in range(self.start_document, self.start_document + self.num_items, self.batch_size):
@@ -156,49 +168,55 @@ class Simple_Doc_gen():
             keys.append('Key_{}'.format(i))
         return keys
 
-    def get_items(self, keys, replica=False):
+    def get_items(self, connection, keys, replica=False):
         try:
-            result = self.bucket.get_multi(keys, replica=replica)
+            result = connection.get_multi(keys, replica=replica)
             return result
         except CouchbaseError as e:
             ok, fail = e.split_results()
             return ok
 
-    def insert_items(self, items):
+    def insert_items(self, connection, items):
         try:
-            result = self.bucket.upsert_multi(items, replicate_to=self.replicate_to)
+            result = connection.upsert_multi(items, ttl=self.ttl, replicate_to=self.replicate_to)
             return result.__len__()
         except ArgumentError:
             self.replicate_to = 0
-            return self.insert_items(items)
+            return self.insert_items(connection, items)
         except CouchbaseError as e:
             ok, fail = e.split_results()
             num_completed = ok.__len__()
             for key in fail:
                 self.retry_batches.append(key)
+            self.key_exists_error += 1
             return num_completed
 
-    def insert_thread(self, update=False):
-        self.thread_lock.acquire()
-        if self.batches.__len__() > 0:
-            batch = self.batches.pop()
-        else:
-            self.thread_lock.release()
-            return 0
-        self.thread_lock.release()
+    def insert_thread(self, connection, batch, update=False):
         if update:
             items = self.get_update_items(batch['start'], batch['end'])
         else:
             items = self.get_create_items(batch['start'], batch['end'])
-        completed = self.insert_items(items)
-        self.thread_lock.acquire()
-        self.num_completed += completed
-        self.thread_lock.release()
+        completed = self.insert_items(connection, items)
         return completed
 
-    def validate_items(self, start, end, replica=False):
+    def insert_thread_pool(self, args):
+        return self.insert_thread(*args)
+
+    def validate_items(self, connection, start, end, replica=False):
         keys = self.get_keys(start, end)
-        result = self.get_items(keys, replica=replica)
+        result = self.get_items(connection, keys, replica=replica)
+        if self.ttl > 0:
+            if result:
+                for key in result.keys():
+                    if replica:
+                        self.missing_key_val_replica.append(key)
+                        return
+                    else:
+                        self.missing_key_val.append(key)
+                        return
+
+            else:
+                return
         for i in range(start, end):
             key = "Key_{}".format(i)
             document = Document(i, self.size)
@@ -226,32 +244,31 @@ class Simple_Doc_gen():
                 else:
                     self.missing_key_val.append(key)
 
-    def validate_thread(self):
-        self.thread_lock.acquire()
-        if self.batches.__len__() > 0:
-            batch = self.batches.pop()
-        else:
-            self.thread_lock.release()
-            return
-        self.thread_lock.release()
-        self.validate_items(batch['start'], batch['end'])
+    def validate_thread(self, connection, batch):
+        self.validate_items(connection, batch['start'], batch['end'])
         if self.replicate_to:
-            self.validate_items(batch['start'], batch['end'], replica=True)
+            self.validate_items(connection, batch['start'], batch['end'], replica=True)
+
+    def validate_thread_pool(self, args):
+        return self.validate_thread(*args)
 
     def run_create_load_gen(self):
         self.create_create_batches()
-        while self.batches:
-            threadpool = []
-            for i in range(0, self.threads):
-                t = threading.Thread(target=self.insert_thread)
-                t.start()
-                threadpool.append(t)
-            for t in threadpool:
-                t.join()
+        args = []
+        num_of_connections_available = self.connections.__len__()
+        for i in range(0, self.batches.__len__()):
+            connection = self.connections[i % num_of_connections_available]
+            args.append((connection, self.batches[i], False))
+        thread_pool = Pool(self.threads)
+        result = thread_pool.map(self.insert_thread_pool, args)
+        thread_pool.close()
+        thread_pool.join()
+        for res in result:
+            self.num_completed += res
         while self.retry_batches:
             items = self.get_create_retry_items()
             self.retry_batches = []
-            completed = self.insert_items(items)
+            completed = self.insert_items(self.connections[0], items)
             self.num_completed += completed
 
     def run_update_load_gen(self):
@@ -259,19 +276,22 @@ class Simple_Doc_gen():
         self.all_batches.reverse()
         while self.all_batches:
             self.batches = self.all_batches.pop()
-            while self.batches:
-                threadpool = []
-                for i in range(0, self.threads):
-                    t = threading.Thread(target=self.insert_thread, args=(True,))
-                    t.start()
-                    threadpool.append(t)
-                for t in threadpool:
-                    t.join()
+            args = []
+            num_of_connections_available = self.connections.__len__()
+            for i in range(0, self.batches.__len__()):
+                connection = self.connections[i % num_of_connections_available]
+                args.append((connection, self.batches[i], True))
+            thread_pool = Pool(self.threads)
+            result = thread_pool.map(self.insert_thread_pool, args)
+            thread_pool.close()
+            thread_pool.join()
+            for res in result:
+                self.num_completed += res
             self.current_update_counter += 1
         while self.retry_batches:
             items = self.get_update_retry_items()
             self.retry_batches = []
-            completed = self.insert_items(items)
+            completed = self.insert_items(self.connections[0], items)
             self.num_completed += completed
 
     def run_validate_load_gen(self):
@@ -282,14 +302,15 @@ class Simple_Doc_gen():
                 self.current_update_counter += 1
         else:
             self.current_update_counter = 0
-        while self.batches:
-            threadpool = []
-            for i in range(0, self.threads):
-                t = threading.Thread(target=self.validate_thread)
-                t.start()
-                threadpool.append(t)
-            for t in threadpool:
-                t.join()
+        args = []
+        num_of_connections_available = self.connections.__len__()
+        for i in range(0, self.batches.__len__()):
+            connection = self.connections[i % num_of_connections_available]
+            args.append((connection, self.batches[i]))
+        thread_pool = Pool(self.threads)
+        result = thread_pool.map(self.validate_thread_pool, args)
+        thread_pool.close()
+        thread_pool.join()
 
     def generate(self):
         if self.updates:
@@ -312,7 +333,7 @@ class Simple_Doc_gen():
 if __name__ == "__main__":
     args = parseArguments()
     if int(args.instances) == 1 or bool(args.validate):
-        doc_loader = Simple_Doc_gen(args)
+        doc_loader = SimpleDocGen(args)
         doc_loader.generate()
     else:
         workers = []
@@ -367,7 +388,7 @@ if __name__ == "__main__":
                 arguments.append(arg)
         for i in range(0, instances):
             arg = arguments[i]
-            doc_loader = Simple_Doc_gen(arg)
+            doc_loader = SimpleDocGen(arg)
             worker = multiprocessing.Process(target=doc_loader.generate, name="Worker {}".format(i))
             workers.append(worker)
             worker.start()
