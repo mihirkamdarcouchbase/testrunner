@@ -14,6 +14,7 @@ from couchbase.bucket import Bucket
 from couchbase.cluster import Cluster, PasswordAuthenticator
 from couchbase.exceptions import NotFoundError, CouchbaseError
 from lib.memcached.helper.data_helper import VBucketAwareMemcached
+from couchbase_helper.document import DesignDocument, View
 
 
 class RebalanceHighOpsWithPillowFight(BaseTestCase):
@@ -28,6 +29,14 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         self.node_out = self.input.param("node_out", 0)
         self.threads = self.input.param("threads", 5)
         self.use_replica_to = self.input.param("use_replica_to",False)
+        self.run_with_views = self.input.param("run_with_views", False)
+        self.default_view_name = "upgrade-test-view"
+        self.ddocs_num = self.input.param("ddocs-num", 1)
+        self.view_num = self.input.param("view-per-ddoc", 2)
+        self.is_dev_ddoc = self.input.param("is-dev-ddoc", False)
+        self.ddocs = []
+        self.run_view_query_iterations = self.input.param(
+            "run_view_query_iterations", 30)
 
     def tearDown(self):
         super(RebalanceHighOpsWithPillowFight, self).tearDown()
@@ -287,34 +296,16 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                            updated, ops, ttl,
                                                            deleted, deleted_items)
 
-    '''
-    def test_rebalance_in(self):
-        rest = RestConnection(self.master)
-        bucket = rest.get_buckets()[0]
-        load_thread = self.load_docs(num_items=self.num_items)
-        self.log.info('starting the load thread...')
-        load_thread.start()
-        rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
-                                                 self.servers[self.nodes_init:self.nodes_init + self.nodes_in],
-                                                 [])
-        rebalance.result()
-        load_thread.join()
-        num_items_to_validate = self.num_items
-        errors = self.check_data(self.master, bucket, num_items_to_validate)
-        if errors:
-            self.log.info("Printing missing keys:")
-        for error in errors:
-            print error
-        if self.num_items != rest.get_active_key_count(bucket):
-            self.fail("FATAL: Data loss detected!! Docs loaded : {0}, docs present: {1}".
-                          format(self.num_items, rest.get_active_key_count(bucket) ))
-
-    '''
-
     def test_rebalance_in(self):
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
         load_thread = self.load_docs()
+        if self.run_with_views:
+            self.log.info('creating ddocs and views')
+            self.create_ddocs_and_views()
+            self.log.info('starting the view query thread...')
+            view_query_thread = self.run_view_queries()
+            view_query_thread.start()
         self.log.info('starting the load thread...')
         load_thread.start()
         load_thread.join()
@@ -327,6 +318,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  [])
         rebalance.result()
         load_thread.join()
+        if self.run_with_views:
+            view_query_thread.join()
         num_items_to_validate = self.num_items * 3
         errors = self.check_data(self.master, bucket, num_items_to_validate)
         if errors:
@@ -493,6 +486,14 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
         load_thread = self.load_docs()
+
+        if self.run_with_views:
+            self.log.info('creating ddocs and views')
+            self.create_ddocs_and_views()
+            self.log.info('starting the view query thread...')
+            view_query_thread = self.run_view_queries()
+            view_query_thread.start()
+
         self.log.info('starting the load thread...')
         load_thread.start()
         load_thread.join()
@@ -503,6 +504,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  [], servs_out)
         rebalance.result()
         load_thread.join()
+
+        if self.run_with_views:
+            view_query_thread.join()
+
         num_items_to_validate = self.num_items * 3
         errors = self.check_data(self.master, bucket, num_items_to_validate)
         if errors:
@@ -678,6 +683,14 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
         load_thread = self.load_docs()
+
+        if self.run_with_views:
+            self.log.info('creating ddocs and views')
+            self.create_ddocs_and_views()
+            self.log.info('starting the view query thread...')
+            view_query_thread = self.run_view_queries()
+            view_query_thread.start()
+
         self.log.info('starting the load thread...')
         load_thread.start()
         load_thread.join()
@@ -690,6 +703,10 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  servs_out)
         rebalance.result()
         load_thread.join()
+
+        if self.run_with_views:
+            view_query_thread.join()
+
         num_items_to_validate = self.num_items * 3
         errors = self.check_data(self.master, bucket, num_items_to_validate)
         if errors:
@@ -1023,3 +1040,34 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                  num_items_to_validate, (
                                  rest.get_replica_key_count(
                                      bucket) / self.num_replicas)))
+
+
+    def run_view_queries(self):
+        view_query_thread = Thread(target=self.view_queries, name="run_queries",
+                                   args=(self.run_view_query_iterations,))
+        return view_query_thread
+
+
+    def view_queries(self, iterations):
+        query = {"connectionTimeout": 60000}
+        for count in xrange(iterations):
+            for i in xrange(self.view_num):
+                self.cluster.query_view(self.master, self.ddocs[0].name,
+                                        self.default_view_name + str(i), query,
+                                        expected_rows=None, bucket="default",
+                                        retry_time=2)
+
+
+    def create_ddocs_and_views(self):
+        self.default_view = View(self.default_view_name, None, None)
+        for bucket in self.buckets:
+            for i in xrange(int(self.ddocs_num)):
+                views = self.make_default_views(self.default_view_name,
+                                                self.view_num,
+                                                self.is_dev_ddoc,
+                                                different_map=True)
+                ddoc = DesignDocument(self.default_view_name + str(i), views)
+                self.ddocs.append(ddoc)
+                for view in views:
+                    self.cluster.create_view(self.master, ddoc.name, view,
+                                             bucket=bucket)
