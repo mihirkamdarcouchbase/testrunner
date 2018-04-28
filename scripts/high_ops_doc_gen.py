@@ -1,7 +1,7 @@
 from copy import deepcopy
 from couchbase.cluster import Cluster, PasswordAuthenticator
 from couchbase.bucket import Bucket, LOCKMODE_WAIT, CouchbaseError, \
-    ArgumentError, NotFoundError
+    ArgumentError, NotFoundError, TimeoutError
 import argparse
 import multiprocessing
 from multiprocessing.dummy import Pool
@@ -193,6 +193,12 @@ class SimpleDocGen:
         try:
             result = connection.get_multi(keys, replica=replica)
             return result
+        except TimeoutError as e:
+            ok, fail = e.split_results()
+            failed_keys = [key for key in fail]
+            result = self.get_items(connection, failed_keys, replica)
+            result.update(ok)
+            return result
         except CouchbaseError as e:
             ok, fail = e.split_results()
             return ok
@@ -337,6 +343,7 @@ class SimpleDocGen:
             for res in result:
                 self.num_completed += res
             self.current_update_counter += 1
+        self.current_update_counter -= 1
         while self.retry_batches:
             items = self.get_update_retry_items()
             self.retry_batches = []
