@@ -81,7 +81,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                      "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --instances {" \
                      "9} --ops {10} --updates"
         cb_version = RestConnection(server).get_nodes_version()[:3]
-        if self.num_replicas > 0:
+        if self.num_replicas > 0 and self.use_replica_to:
             cmd_format = "{} --replicate_to 1".format(cmd_format)
         cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
                                 server.rest_password,
@@ -115,7 +115,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                      "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --instances {" \
                      "9} --ops {10} --delete"
         cb_version = RestConnection(server).get_nodes_version()[:3]
-        if self.num_replicas > 0:
+        if self.num_replicas > 0 and self.use_replica_to:
             cmd_format = "{} --replicate_to 1".format(cmd_format)
         cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
                                 server.rest_password,
