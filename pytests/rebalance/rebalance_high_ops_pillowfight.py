@@ -302,11 +302,11 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         rest = RestConnection(self.master)
         bucket = rest.get_buckets()[0]
 
-        servers_in = []
-        for i in range(0,self.nodes_in):
-            servers_in.append(self.servers[self.nodes_init+i])
+        #servers_in = []
+        #for i in range(0,self.nodes_in):
+        #    servers_in.append(self.servers[self.nodes_init+i])
 
-        self.log.info("Servers In : {0}".format(servers_in))
+        #self.log.info("Servers In : {0}".format(servers_in))
 
         load_thread = self.load_docs()
         if self.run_with_views:
@@ -322,7 +322,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                      start_document=self.num_items)
         load_thread.start()
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
-                                                 servers_in,
+                                                 self.servers[
+                                                 self.nodes_init:self.nodes_init + self.nodes_in],
                                                  [])
         rebalance.result()
         load_thread.join()
@@ -513,14 +514,14 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                  0, (rest.get_replica_key_count(bucket) / self.num_replicas)))
 
     def test_rebalance_out(self):
-        #servs_out = [self.servers[self.nodes_init - i - 1] for i in
-        #             range(self.nodes_out)]
+        servs_out = [self.servers[self.nodes_init - i - 1] for i in
+                     range(self.nodes_out)]
 
-        servs_out = []
-        for i in range(0, self.nodes_out):
-            servs_out.append(self.servers[self.nodes_init -1 - i])
+        #servs_out = []
+        #for i in range(0, self.nodes_out):
+        #    servs_out.append(self.servers[self.nodes_init -1 - i])
 
-        self.log.info("Servers In : {0}".format(servs_out))
+        #self.log.info("Servers In : {0}".format(servs_out))
 
         self.log.info("Servers Out: {0}".format(servs_out))
         rest = RestConnection(self.master)
