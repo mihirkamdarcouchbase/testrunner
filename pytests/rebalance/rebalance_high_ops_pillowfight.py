@@ -1186,12 +1186,11 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
     def test_rebalance_in_with_indexer_node(self):
         rest = RestConnection(self.master)
         rest.add_node(self.servers[self.nodes_init].rest_username,
-                          self.servers[1].rest_password,
-                          self.servers[1].ip, services=['index','n1ql'])
+                          self.servers[self.nodes_init].rest_password,
+                          self.servers[self.nodes_init].ip, services=['index','n1ql'])
 
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
-                                                 self.servers[
-                                                 self.nodes_init:self.nodes_init + 1],
+                                                 [self.servers[self.nodes_init]],
                                                  [], ["index","n1ql"])
 
         rebalance.result()
@@ -1211,7 +1210,7 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         load_thread.start()
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  self.servers[
-                                                 self.nodes_init:self.nodes_init + self.nodes_in + 1],
+                                                 self.nodes_init + 1:self.nodes_init + self.nodes_in + 1],
                                                  [])
         rebalance.result()
         load_thread.join()
