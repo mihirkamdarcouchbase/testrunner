@@ -325,7 +325,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  [])
-        rebalance.result()
+        #rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         load_thread.join()
         if self.run_with_views:
             view_query_thread.join()
@@ -374,7 +375,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  [])
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         update_thread.join()
         if self.run_with_views:
             view_query_thread.join()
@@ -428,7 +430,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  [])
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         delete_thread.join()
         if self.run_with_views:
             view_query_thread.join()
@@ -484,7 +487,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  [])
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         validate_thread.join()
 
         if self.run_with_views:
@@ -543,7 +547,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         load_thread.start()
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  [], servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         load_thread.join()
 
         if self.run_with_views:
@@ -596,7 +601,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         update_thread.start()
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  [], servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         update_thread.join()
         if self.run_with_views:
             view_query_thread.join()
@@ -653,7 +659,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         delete_thread.start()
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  [], servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         delete_thread.join()
         if self.run_with_views:
             view_query_thread.join()
@@ -713,7 +720,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         validate_thread.start()
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  [], servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         validate_thread.join()
 
         if self.run_with_views:
@@ -769,7 +777,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         load_thread.join()
 
         if self.run_with_views:
@@ -823,7 +832,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         update_thread.join()
 
         if self.run_with_views:
@@ -883,7 +893,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         delete_thread.join()
 
         if self.run_with_views:
@@ -949,7 +960,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         validate_thread.join()
 
         if self.run_with_views:
@@ -1011,7 +1023,6 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
 
         reached = RestHelper(rest).rebalance_reached()
         self.assertTrue(reached, "rebalance failed, stuck or did not complete")
-        rebalance.result()
         load_thread.join()
         num_items_to_validate = self.num_items * 3
         errors = self.check_data(self.master, bucket, num_items_to_validate)
@@ -1054,7 +1065,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  [])
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         load_thread.join()
         num_items_to_validate = self.num_items * 3
         errors = self.check_data(self.master, bucket, num_items_to_validate)
@@ -1084,7 +1096,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         # Remove 1 node
         rebalance = self.cluster.async_rebalance(self.servers[:self.nodes_init],
                                                  [], servs_out)
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         load_thread.join()
         num_items_to_validate = self.num_items * 5
         errors = self.check_data(self.master, bucket, num_items_to_validate)
@@ -1153,6 +1166,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  self.nodes_init:self.nodes_init + self.nodes_in],
                                                  [])
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         for i in range(1,100):
             self.sleep(20)
             stopped = rest.stop_rebalance(wait_timeout=10)
@@ -1160,7 +1175,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
             self.sleep(10)
             rebalance = self.cluster.async_rebalance(
                 self.servers[:self.nodes_init], [], [])
-        rebalance.result()
+            # rebalance.result()
+            rest.monitorRebalance(stop_if_loop=False)
         load_thread.join()
 
         num_items_to_validate = self.num_items * 3
@@ -1193,7 +1209,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  [self.servers[self.nodes_init]],
                                                  [], ["index","n1ql"])
 
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         bucket = rest.get_buckets()[0]
 
         # Create Secondary index
@@ -1212,7 +1229,8 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
                                                  self.servers[
                                                  (self.nodes_init + 1):(self.nodes_init + self.nodes_in + 1)],
                                                  [])
-        rebalance.result()
+        # rebalance.result()
+        rest.monitorRebalance(stop_if_loop=False)
         load_thread.join()
 
         num_items_to_validate = self.num_items * 3
