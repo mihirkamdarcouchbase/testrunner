@@ -39,6 +39,13 @@ class RebalanceHighOpsWithPillowFight(BaseTestCase):
         self.ddocs = []
         self.run_view_query_iterations = self.input.param(
             "run_view_query_iterations", 30)
+        self.rebalance_quirks = self.input.param('rebalance_quirks', False)
+
+        if self.rebalance_quirks:
+            for server in self.servers:
+                rest = RestConnection(server)
+                rest.diag_eval(
+                    "[ns_config:set({node, N, extra_rebalance_quirks}, [reset_replicas, trivial_moves]) || N <- ns_node_disco:nodes_wanted()].")
 
     def tearDown(self):
         super(RebalanceHighOpsWithPillowFight, self).tearDown()
